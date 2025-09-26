@@ -1,0 +1,44 @@
+# Go build
+/bin/
+/build/
+/dist/
+/out/
+/tmp/
+/coverage/
+/profile.out
+*.exe
+*.test
+*.cover
+*.log
+
+# Modules / deps
+vendor/
+# Si no usás vendor, igual mantenelo ignorado por si alguien lo genera
+go.work
+go.work.sum
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+*.local
+
+# Containers
+docker-data/
+*.tar
+
+# Generated assets
+conversations/
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Node (por si tenés tooling front)
+node_modules/
