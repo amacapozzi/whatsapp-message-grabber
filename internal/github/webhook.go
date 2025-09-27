@@ -10,41 +10,39 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func UpdateServerFromWebhook(c *gin.Context) error {
-
+func UpdateServerFromWebhook(c *gin.Context) {
 	discordRepo := discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl)
 
 	go func() {
 		cmds := []string{
-			"git pull origin main",
+			"git reset --hard && git pull origin main",
 			"go build -o server",
-			"pm2 restart usermanagement",
+			"pm2 restart usermanagement || pm2 start ./server --name usermanagement",
 		}
 
 		updateEmbed := discord.Embed{
-			Username: "Updated",
+			Username: "Deploy Bot",
 			Embeds: []discord.EmbedItem{
 				{
-					Title:       "New update",
-					Description: "Se ha actualizado el codigo",
+					Title:       "🚀 Nueva actualización",
+					Description: "Se ha desplegado el último commit de GitHub.",
 					Color:       0x00BFFF,
 				},
 			},
 		}
+		_ = discordRepo.SendMessage(updateEmbed)
 
-		discordRepo.SendMessage(updateEmbed)
-
+		//  comandos
 		for _, cmd := range cmds {
-			fmt.Println("Executing:", cmd)
+			fmt.Println("🔹 Ejecutando:", cmd)
 			out, err := exec.Command("bash", "-c", cmd).CombinedOutput()
 			if err != nil {
-				log.Println("❌ Error executing command:", err)
+				log.Printf("❌ Error en '%s': %v - %s\n", cmd, err, string(out))
 			} else {
-				log.Println("✅ OK:", string(out))
+				log.Printf("✅ OK '%s': %s\n", cmd, string(out))
 			}
 		}
-
 	}()
 
-	return nil
+	c.JSON(200, gin.H{"success": true, "message": "Update triggered"})
 }
