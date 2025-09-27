@@ -95,6 +95,8 @@ func (h *Handler) handleMessage(v *waEvents.Message) {
 		h.sendImage(v.Message.GetImageMessage(), push, avatar, jid, iso)
 	case v.Message.DocumentMessage != nil:
 		h.sendDocument(v.Message.DocumentMessage)
+	case v.Message.VideoMessage != nil:
+		h.trySendVideo(v.Message.VideoMessage)
 	}
 }
 
@@ -233,6 +235,24 @@ func (h *Handler) sendDocument(doc *waProto.DocumentMessage) {
 
 	h.discordRepo.SendMessageWithBytes(payload, *doc.FileName, docBytes)
 
+}
+
+func (h *Handler) trySendVideo(video *waProto.VideoMessage) {
+	payload := discord.Embed{
+		Username: usernameBot,
+		Embeds: []discord.EmbedItem{
+			{
+				Title:       "📂 Nuevo video recibido",
+				Description: fmt.Sprintf("Inoformacion del video: seconds`%s` (%d bytes)", video.Seconds, video.FileLength),
+				Color:       colorPrimary,
+			},
+		},
+	}
+
+	videoBytes, _ := h.client.Download(context.Background(), video)
+	if err := h.discordRepo.SendMessageWithBytes(payload, "video.mp4", videoBytes); err != nil {
+		fmt.Println("Error uploading video")
+	}
 }
 
 func (h *Handler) tryGetAvatarURL(jid waTypes.JID) string {
