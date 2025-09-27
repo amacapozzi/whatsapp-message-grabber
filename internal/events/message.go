@@ -9,6 +9,7 @@ import (
 	"msg-grabber/internal/config"
 	"msg-grabber/internal/discord"
 	"msg-grabber/internal/repository"
+	"msg-grabber/internal/wasabi"
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -20,6 +21,7 @@ var histStore = repository.NewStore()
 
 func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 	discordRepo := discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl)
+	wasabiRepo := wasabi.NewWasabiRepository()
 
 	return func(evt interface{}) {
 		switch v := evt.(type) {
@@ -57,6 +59,38 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 					_ = discordRepo.SendMessage(payload)
 				}
 			} else {
+				_ = discordRepo.SendMessage(payload)
+			}
+
+			if v.Message.GetAudioMessage() != nil {
+				audio := v.Message.GetAudioMessage()
+
+				audioBytes, err := client.Download(context.Background(), audio)
+				if err != nil {
+					fmt.Println("❌ Error descargando audio:", err)
+					return
+				}
+
+				fileName := fmt.Sprintf("audio_%d.ogg", time.Now().Unix())
+
+				url, err := wasabiRepo.UploadFile(audioBytes, fileName, audio.GetMimetype())
+				if err != nil {
+					fmt.Println("❌ Error subiendo a Wasabi:", err)
+					return
+				}
+
+				fmt.Println("✅ Audio subido a Wasabi:", url)
+
+				payload := discord.Embed{
+					Username: "WhatsApp Bot",
+					Embeds: []discord.EmbedItem{
+						{
+							Title:       "🎵 Nuevo audio recibido",
+							Description: fmt.Sprintf("Archivo subido: [%s](%s)", fileName, url),
+							Color:       0x5865F2,
+						},
+					},
+				}
 				_ = discordRepo.SendMessage(payload)
 			}
 
