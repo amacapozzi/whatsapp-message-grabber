@@ -18,173 +18,248 @@ import (
 
 var histStore = repository.NewStore()
 
-func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
-	discordRepo := discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl)
+type discordSender interface {
+	SendMessage(embed discord.Embed) error
+	SendMessageWithBytes(embed discord.Embed, filename string, data []byte) error
+}
 
-	return func(evt interface{}) {
-		switch v := evt.(type) {
+type Handler struct {
+	client      *whatsmeow.Client
+	discordRepo discordSender
+}
 
-		case *waEvents.Message:
+const (
+	colorPrimary   = 0x5865F2
+	colorImage     = 0x00BFFF
+	usernameBot    = "WhatsApp Bot"
+	historyName    = "history.txt"
+	maxCodeBlock   = 1900
+	defaultTimeout = 30 * time.Second
+)
 
-			push := v.Info.PushName
-			jid := v.Info.Sender
+func NewMessageEventHandler(client *whatsmeow.Client) func(evt any) {
+	h := &Handler{
+		client:      client,
+		discordRepo: discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl),
+	}
+	return h.Handle
+}
 
-			avatar := tryGetAvatarURL(client, jid)
+func (h *Handler) Handle(evt any) {
+	switch v := evt.(type) {
+	case *waEvents.Message:
+		h.handleMessage(v)
+	case *waEvents.HistorySync:
+		h.handleHistorySync(v)
+	}
+}
 
-			content := extractTextFromWMI(v.Message)
-			if content == "" {
-				return
+func (h *Handler) handleMessage(v *waEvents.Message) {
+	push := v.Info.PushName
+	jid := v.Info.Sender
+	avatar := h.tryGetAvatarURL(jid)
+
+	content := extractTextFromWMI(v.Message)
+	if content == "" {
+		return
+	}
+
+	ts := v.Info.Timestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	iso := ts.UTC().Format(time.RFC3339Nano)
+
+	line := fmt.Sprintf("[%s] %s: %s",
+		ts.Format("2006-01-02 15:04:05"),
+		safe(push),
+		content,
+	)
+	allBytes, _ := histStore.AppendBatch(jid.String(), []string{line})
+
+	payload := buildEmbed(push, avatar, jid, iso, content, h.client.Store.ID.User)
+
+	if len(allBytes) > 0 {
+		if err := h.discordRepo.SendMessageWithBytes(payload, historyName, allBytes); err != nil {
+			fmt.Println("❌ Error enviando a Discord con adjunto:", err)
+			_ = h.discordRepo.SendMessage(payload)
+		}
+	} else {
+		_ = h.discordRepo.SendMessage(payload)
+	}
+
+	switch {
+	case v.Message.GetAudioMessage() != nil:
+		h.sendAudio(v.Message.GetAudioMessage(), ts)
+	case v.Message.GetImageMessage() != nil:
+		h.sendImage(v.Message.GetImageMessage(), push, avatar, jid, iso)
+	case v.Message.DocumentMessage != nil:
+		h.sendDocument(v.Message.DocumentMessage)
+	}
+}
+
+func (h *Handler) handleHistorySync(v *waEvents.HistorySync) {
+	linesByJID := make(map[string][]string)
+
+	for _, conv := range v.Data.Conversations {
+		jid := conv.GetId()
+		if jid == "" {
+			continue
+		}
+
+		for _, hmsg := range conv.Messages {
+			if hmsg.Message == nil {
+				continue
 			}
 
-			ts := v.Info.Timestamp
-			if ts.IsZero() {
-				ts = time.Now()
+			wmi := hmsg.Message
+			ts := msgTime(wmi)
+			sender := msgSender(wmi)
+			text := extractTextFromWMI(wmi.Message)
+			if text == "" {
+				text = "(contenido no textual)"
 			}
-			iso := ts.UTC().Format(time.RFC3339Nano)
 
 			line := fmt.Sprintf("[%s] %s: %s",
 				ts.Format("2006-01-02 15:04:05"),
-				safe(push),
-				content,
+				sender,
+				text,
 			)
-			allBytes, _ := histStore.AppendBatch(jid.String(), []string{line})
+			linesByJID[jid] = append(linesByJID[jid], line)
+		}
+	}
 
-			payload := buildEmbed(push, avatar, jid, iso, content, client.Store.ID.User)
-
-			if len(allBytes) > 0 {
-				if err := discordRepo.SendMessageWithBytes(payload, "history.txt", allBytes); err != nil {
-					fmt.Println("❌ Error enviando a Discord con adjunto:", err)
-					_ = discordRepo.SendMessage(payload)
-				}
-			} else {
-				_ = discordRepo.SendMessage(payload)
-			}
-
-			if v.Message.GetAudioMessage() != nil {
-				audio := v.Message.GetAudioMessage()
-
-				audioBytes, err := client.Download(context.Background(), audio)
-				if err != nil {
-					fmt.Println("❌ Error descargando audio:", err)
-					return
-				}
-
-				fileName := fmt.Sprintf("audio_%d.ogg", time.Now().Unix())
-				payload := discord.Embed{
-					Username: "WhatsApp Bot",
-					Embeds: []discord.EmbedItem{
-						{
-							Title:       "🎵 Nuevo audio recibido",
-							Description: fmt.Sprintf("Archivo subido: [%s]", fileName),
-							Color:       0x5865F2,
-						},
-					},
-				}
-
-				discordRepo.SendMessageWithBytes(payload, fileName, audioBytes)
-			}
-			if v.Message.GetImageMessage() != nil {
-				img := v.Message.GetImageMessage()
-
-				data, err := client.Download(context.Background(), img)
-				if err != nil {
-					fmt.Println("❌ Error descargando imagen:", err)
-					return
-				}
-
-				filename := fmt.Sprintf("image_%d.jpg", ts.Unix())
-
-				imgPayload := discord.Embed{
-					Username:  push,
-					AvatarURL: avatar,
-					Embeds: []discord.EmbedItem{
-						{
-							Title:       fmt.Sprintf("📷 Imagen recibida en %s", client.Store.ID.User),
-							Description: fmt.Sprintf("**De:** %s\n**JID:** `%s`", safe(push), jid.String()),
-							Color:       0x00BFFF,
-							Timestamp:   iso,
-							Author: &discord.Author{
-								Name:    safe(push),
-								IconURL: avatar,
-							},
-						},
-					},
-				}
-
-				if err := discordRepo.SendMessageWithBytes(imgPayload, filename, data); err != nil {
-					fmt.Println("❌ Error enviando imagen a Discord:", err)
-				}
-			}
-
-		case *waEvents.HistorySync:
-			linesByJID := map[string][]string{}
-
-			for _, conv := range v.Data.Conversations {
-				jid := conv.GetId()
-				if jid == "" {
-					continue
-				}
-				for _, hmsg := range conv.Messages {
-					if hmsg.Message == nil {
-						continue
-					}
-					wmi := hmsg.Message
-
-					ts := msgTime(wmi)
-					sender := msgSender(wmi)
-					text := extractTextFromWMI(wmi.Message)
-					if text == "" {
-						text = "(contenido no textual)"
-					}
-
-					line := fmt.Sprintf("[%s] %s: %s",
-						ts.Format("2006-01-02 15:04:05"),
-						sender,
-						text,
-					)
-					linesByJID[jid] = append(linesByJID[jid], line)
-				}
-			}
-
-			for jid, lines := range linesByJID {
-				if len(lines) == 0 {
-					continue
-				}
-				if _, err := histStore.AppendBatch(jid, lines); err != nil {
-					fmt.Println("❌ Error guardando history sync:", err)
-				}
-			}
+	for jid, lines := range linesByJID {
+		if len(lines) == 0 {
+			continue
+		}
+		if _, err := histStore.AppendBatch(jid, lines); err != nil {
+			fmt.Println("❌ Error guardando history sync:", err)
 		}
 	}
 }
 
-func tryGetAvatarURL(client *whatsmeow.Client, jid waTypes.JID) string {
-	if client == nil {
-		return ""
+func (h *Handler) sendAudio(aud *waProto.AudioMessage, ts time.Time) {
+	if aud == nil {
+		return
 	}
-	if ppi, err := client.GetProfilePictureInfo(jid, &whatsmeow.GetProfilePictureParams{Preview: false}); err == nil && ppi != nil {
-		return ppi.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	audioBytes, err := h.client.Download(ctx, aud)
+	if err != nil {
+		fmt.Println("❌ Error descargando audio:", err)
+		return
 	}
-	return ""
+
+	ext := mimeToExt(aud.GetMimetype())
+	if ext == "" {
+		ext = "ogg"
+	}
+	fileName := fmt.Sprintf("audio_%d.%s", ts.Unix(), ext)
+
+	payload := discord.Embed{
+		Username: usernameBot,
+		Embeds: []discord.EmbedItem{
+			{
+				Title:       "🎵 Nuevo audio recibido",
+				Description: fmt.Sprintf("Archivo subido: `%s` (%d bytes)", fileName, len(audioBytes)),
+				Color:       colorPrimary,
+			},
+		},
+	}
+
+	_ = h.discordRepo.SendMessageWithBytes(payload, fileName, audioBytes)
 }
 
-func buildEmbed(push, avatar string, jid waTypes.JID, iso, content string, id string) discord.Embed {
-	return discord.Embed{
-		Username:  push,
+func (h *Handler) sendImage(img *waProto.ImageMessage, push, avatar string, jid waTypes.JID, iso string) {
+	if img == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	data, err := h.client.Download(ctx, img)
+	if err != nil {
+		fmt.Println("❌ Error descargando imagen:", err)
+		return
+	}
+
+	ext := mimeToExt(img.GetMimetype())
+	if ext == "" {
+		ext = "jpg"
+	}
+	filename := fmt.Sprintf("image_%d.%s", time.Now().Unix(), ext)
+
+	imgPayload := discord.Embed{
+		Username:  safe(push),
 		AvatarURL: avatar,
 		Embeds: []discord.EmbedItem{
 			{
-				Title:       fmt.Sprintf("📩 Nuevo mensaje recibido en %s", id),
+				Title:       fmt.Sprintf("📷 Imagen recibida en %s", h.client.Store.ID.User),
 				Description: fmt.Sprintf("**De:** %s\n**JID:** `%s`", safe(push), jid.String()),
-				Color:       0x5865F2,
+				Color:       colorImage,
 				Timestamp:   iso,
 				Author: &discord.Author{
 					Name:    safe(push),
 					IconURL: avatar,
 				},
-				Thumbnail: &discord.Thumbnail{
-					URL: avatar,
+				Thumbnail: &discord.Thumbnail{URL: avatar},
+			},
+		},
+	}
+
+	if err := h.discordRepo.SendMessageWithBytes(imgPayload, filename, data); err != nil {
+		fmt.Println("❌ Error enviando imagen a Discord:", err)
+	}
+}
+
+func (h *Handler) sendDocument(doc *waProto.DocumentMessage) {
+
+	payload := discord.Embed{
+		Username: usernameBot,
+		Embeds: []discord.EmbedItem{
+			{
+				Title:       "📂 Nuevo archivo recibido",
+				Description: fmt.Sprintf("Archivo subido: `%s` (%d bytes)", *doc.FileName, doc.FileLength),
+				Color:       colorPrimary,
+			},
+		},
+	}
+
+	docBytes, _ := h.client.Download(context.Background(), doc)
+
+	h.discordRepo.SendMessageWithBytes(payload, *doc.FileName, docBytes)
+
+}
+
+func (h *Handler) tryGetAvatarURL(jid waTypes.JID) string {
+	if h.client == nil {
+		return ""
+	}
+	if ppi, err := h.client.GetProfilePictureInfo(jid, &whatsmeow.GetProfilePictureParams{Preview: false}); err == nil && ppi != nil {
+		return ppi.URL
+	}
+	return ""
+}
+
+func buildEmbed(push, avatar string, jid waTypes.JID, iso, content, id string) discord.Embed {
+	return discord.Embed{
+		Username:  safe(push),
+		AvatarURL: avatar,
+		Embeds: []discord.EmbedItem{
+			{
+				Title:       fmt.Sprintf("📩 Nuevo mensaje recibido en %s", id),
+				Description: fmt.Sprintf("**De:** %s\n**JID:** `%s`", safe(push), jid.String()),
+				Color:       colorPrimary,
+				Timestamp:   iso,
+				Author: &discord.Author{
+					Name:    safe(push),
+					IconURL: avatar,
 				},
+				Thumbnail: &discord.Thumbnail{URL: avatar},
 				Fields: []discord.EmbedField{
 					{Name: "Contenido", Value: codeBlock(content), Inline: false},
 				},
@@ -194,64 +269,72 @@ func buildEmbed(push, avatar string, jid waTypes.JID, iso, content string, id st
 }
 
 func msgSender(wmi *waProto.WebMessageInfo) string {
-	if wmi == nil || wmi.Key == nil {
+	switch {
+	case wmi == nil || wmi.Key == nil:
+		return "(desconocido)"
+	case wmi.GetKey().GetParticipant() != "":
+		return wmi.GetKey().GetParticipant()
+	case wmi.GetKey().GetFromMe():
+		return "(yo)"
+	case wmi.GetKey().GetRemoteJid() != "":
+		return wmi.GetKey().GetRemoteJid()
+	default:
 		return "(desconocido)"
 	}
-	if p := wmi.GetKey().GetParticipant(); p != "" {
-		return p
-	}
-	if wmi.GetKey().GetFromMe() {
-		return "(yo)"
-	}
-	if r := wmi.GetKey().GetRemoteJid(); r != "" {
-		return r
-	}
-	return "(desconocido)"
 }
 
 func msgTime(wmi *waProto.WebMessageInfo) time.Time {
 	if wmi == nil {
 		return time.Now()
 	}
-	sec := wmi.GetMessageTimestamp()
-	if sec <= 0 {
-		return time.Now()
+	if sec := wmi.GetMessageTimestamp(); sec > 0 {
+		return time.Unix(int64(sec), 0)
 	}
-	return time.Unix(int64(sec), 0)
+	return time.Now()
 }
 
 func extractTextFromWMI(msg *waProto.Message) string {
-	if msg == nil {
+	switch {
+	case msg == nil:
 		return ""
-	}
-	if t := msg.GetConversation(); t != "" {
-		return t
-	}
-	if ext := msg.GetExtendedTextMessage(); ext != nil && ext.Text != nil {
-		return ext.GetText()
-	}
-	if c := msg.GetContactMessage(); c != nil && c.DisplayName != nil {
-		return "[contacto] " + c.GetDisplayName()
-	}
-	if l := msg.GetLocationMessage(); l != nil {
-		return fmt.Sprintf("[ubicación] lat=%.5f lon=%.5f", l.GetDegreesLatitude(), l.GetDegreesLongitude())
-	}
-	if img := msg.GetImageMessage(); img != nil {
-		if img.Caption != nil && *img.Caption != "" {
-			return "[imagen] " + img.GetCaption()
+	case msg.GetConversation() != "":
+		return msg.GetConversation()
+	case msg.GetExtendedTextMessage() != nil && msg.GetExtendedTextMessage().Text != nil:
+		return msg.GetExtendedTextMessage().GetText()
+	case msg.GetContactMessage() != nil && msg.GetContactMessage().DisplayName != nil:
+		return "[contacto] " + msg.GetContactMessage().GetDisplayName()
+	case msg.GetLocationMessage() != nil:
+		loc := msg.GetLocationMessage()
+		return fmt.Sprintf("[ubicación] lat=%.5f lon=%.5f", loc.GetDegreesLatitude(), loc.GetDegreesLongitude())
+	case msg.GetImageMessage() != nil:
+		im := msg.GetImageMessage()
+		if im.Caption != nil && *im.Caption != "" {
+			return "[imagen] " + im.GetCaption()
 		}
 		return "[imagen]"
+	case msg.GetVideoMessage() != nil:
+		vm := msg.GetVideoMessage()
+		return "[video] " + strings.TrimSpace(vm.GetCaption()+" "+vm.GetURL())
+	case msg.GetDocumentMessage() != nil:
+		dm := msg.GetDocumentMessage()
+		name := dm.GetFileName()
+		url := dm.GetURL()
+		switch {
+		case name != "" && url != "":
+			return "[documento] " + name + " " + url
+		case name != "":
+			return "[documento] " + name
+		case url != "":
+			return "[documento] " + url
+		default:
+			return "[documento]"
+		}
+	case msg.GetAudioMessage() != nil:
+		am := msg.GetAudioMessage()
+		return fmt.Sprintf("[audio] (%d bytes) %s", am.GetFileLength(), strings.TrimSpace(am.GetURL()))
+	default:
+		return ""
 	}
-	if vid := msg.GetVideoMessage(); vid != nil {
-		return "[video] " + vid.GetCaption() + vid.GetURL()
-	}
-	if doc := msg.GetDocumentMessage(); doc != nil && doc.FileName != nil {
-		return "[documento] %d " + doc.GetFileName() + doc.GetURL()
-	}
-	if aud := msg.GetAudioMessage(); aud != nil {
-		return fmt.Sprintf("[audio] (%d bytes) AudioURL (%s)", aud.GetFileLength(), aud.GetURL())
-	}
-	return ""
 }
 
 func safe(s string) string {
@@ -262,14 +345,14 @@ func safe(s string) string {
 }
 
 func codeBlock(s string) string {
-	if len(s) > 1900 {
-		s = s[:1900] + "…"
+	if len(s) > maxCodeBlock {
+		s = s[:maxCodeBlock] + "…"
 	}
 	return "```\n" + s + "\n```"
 }
 
 func mimeToExt(mime string) string {
-	mime = strings.ToLower(mime)
+	mime = strings.ToLower(strings.TrimSpace(mime))
 	switch mime {
 	case "image/jpeg", "image/jpg":
 		return "jpg"
@@ -279,9 +362,13 @@ func mimeToExt(mime string) string {
 		return "webp"
 	case "image/gif":
 		return "gif"
+	case "audio/ogg", "application/ogg":
+		return "ogg"
+	case "audio/mpeg":
+		return "mp3"
 	default:
 		if i := strings.LastIndex(mime, "/"); i >= 0 {
-			return strings.Trim(strings.ToLower(mime[i+1:]), " ")
+			return strings.TrimSpace(strings.ToLower(mime[i+1:]))
 		}
 		return ""
 	}
