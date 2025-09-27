@@ -10,8 +10,10 @@ type GithubRoutes struct {
 	Engine *gin.Engine
 }
 
-func (g *GithubRoutes) Register() {
-	g.Engine.POST("/github/webhook", func(c *gin.Context) {
-		github.UpdateServerFromWebhook(c)
-	})
+func NewGithubRoutes(engine *gin.Engine) *GithubRoutes {
+	return &GithubRoutes{Engine: engine}
+}
+
+func (r *GithubRoutes) Register() {
+	r.Engine.POST("/github/webhook", github.UpdateServerFromWebhook)
 }

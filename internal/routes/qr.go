@@ -22,6 +22,5 @@ func NewQrRoutes(engine *gin.Engine, qh *handlers.QrHandler, sh *handlers.Sessio
 
 func (r *QrRoutes) Register() {
 	r.Engine.GET("/qr", r.QrHandler.GetQrCode)
-
 	r.Engine.GET("/qr/create-session", r.SessionHandler.CreateSession)
 }

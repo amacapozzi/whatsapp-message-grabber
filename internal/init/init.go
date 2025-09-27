@@ -66,6 +66,8 @@ func Init() *server.ServerStruct {
 	qrHandler := handlers.NewQrHandler(waService)
 	sessionHandler := handlers.NewSessionHandler(manager)
 
+	gr := routes.NewGithubRoutes(srv.Engine)
+	gr.Register()
 	qrRoutes := routes.NewQrRoutes(srv.Engine, qrHandler, sessionHandler)
 	qrRoutes.Register()
 
