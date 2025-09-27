@@ -243,7 +243,7 @@ func (h *Handler) trySendVideo(video *waProto.VideoMessage) {
 		Embeds: []discord.EmbedItem{
 			{
 				Title:       "📂 Nuevo video recibido",
-				Description: fmt.Sprintf("Inoformacion del video: seconds`%s` (%d bytes)", video.Seconds, video.FileLength),
+				Description: fmt.Sprintf("Inoformacion del video: seconds`%d` (%d bytes)", *video.Seconds, *video.FileLength),
 				Color:       colorPrimary,
 			},
 		},
