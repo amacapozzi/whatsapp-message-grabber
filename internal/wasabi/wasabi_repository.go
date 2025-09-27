@@ -3,10 +3,6 @@ package wasabi
 import (
 	"bytes"
 	"fmt"
-	"mime"
-	"path/filepath"
-	"time"
-
 	"msg-grabber/internal/config"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -15,44 +11,25 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-type WasabiRepository interface {
-	UploadFile(fileBytes []byte, filename string, contentType string) (string, error)
-}
-
 type WasabiDataInteraction struct {
 	s3     *s3.S3
 	bucket string
 }
 
-func (w *WasabiDataInteraction) UploadFile(fileBytes []byte, filename string, contentType string) (string, error) {
-	if w.s3 == nil {
-		return "", fmt.Errorf("s3 client is nil")
-	}
-	if w.bucket == "" {
-		return "", fmt.Errorf("bucket name is empty")
-	}
-
-	if contentType == "" {
-		contentType = mime.TypeByExtension(filepath.Ext(filename))
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-	}
-
-	key := fmt.Sprintf("uploads/%d_%s", time.Now().Unix(), filename)
-
+func (w *WasabiDataInteraction) UploadFile(fileName string, fileBytes []byte, mime string) (string, error) {
 	_, err := w.s3.PutObject(&s3.PutObjectInput{
 		Bucket:      aws.String(w.bucket),
-		Key:         aws.String(key),
+		Key:         aws.String(fileName),
 		Body:        bytes.NewReader(fileBytes),
-		ContentType: aws.String(contentType),
-		ACL:         aws.String("private"),
+		ContentType: aws.String(mime),
+		ACL:         aws.String("public-read"), // público
 	})
 	if err != nil {
-		return "", fmt.Errorf("put object: %w", err)
+		return "", err
 	}
 
-	url := fmt.Sprintf("https://%s.s3.wasabisys.com/%s", w.bucket, key)
+	// Construir URL pública
+	url := fmt.Sprintf("https://s3.us-east-1.wasabisys.com/%s/%s", w.bucket, fileName)
 	return url, nil
 }
 
@@ -64,8 +41,7 @@ func CreateSession() *WasabiDataInteraction {
 		S3ForcePathStyle: aws.Bool(true),
 	})
 	if err != nil {
-		fmt.Println("❌ failed to create wasabi session:", err)
-		return nil
+		panic(err)
 	}
 
 	svc := s3.New(sess)
