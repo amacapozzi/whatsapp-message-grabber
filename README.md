@@ -11,7 +11,7 @@ Servicio en Go que:
 
 ## 📦 Stack
 
-- Go 1.21+
+- Go 1.25.1+
 - Postgres (almacenamiento de dispositivos de whatsmeow)
 - Gin (API)
 - Whatsmeow (cliente WA)
