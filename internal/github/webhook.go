@@ -32,7 +32,6 @@ func UpdateServerFromWebhook(c *gin.Context) {
 		}
 		_ = discordRepo.SendMessage(updateEmbed)
 
-		//  comandos
 		for _, cmd := range cmds {
 			fmt.Println("🔹 Ejecutando:", cmd)
 			out, err := exec.Command("bash", "-c", cmd).CombinedOutput()

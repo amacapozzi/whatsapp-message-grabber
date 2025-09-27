@@ -28,7 +28,6 @@ func (w *WasabiDataInteraction) UploadFile(fileName string, fileBytes []byte, mi
 		return "", err
 	}
 
-	// Construir URL pública
 	url := fmt.Sprintf("https://s3.us-east-1.wasabisys.com/%s/%s", w.bucket, fileName)
 	return url, nil
 }
