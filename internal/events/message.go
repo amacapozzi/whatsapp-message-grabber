@@ -73,7 +73,7 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 
 				fileName := fmt.Sprintf("audio_%d.ogg", time.Now().Unix())
 
-				url, err := wasabiRepo.UploadFile(audioBytes, fileName, audio.GetMimetype())
+				url, err := wasabiRepo.UploadFile(fileName, audioBytes, audio.GetMimetype())
 				if err != nil {
 					fmt.Println("❌ Error subiendo a Wasabi:", err)
 					return

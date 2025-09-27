@@ -22,7 +22,7 @@ func (w *WasabiDataInteraction) UploadFile(fileName string, fileBytes []byte, mi
 		Key:         aws.String(fileName),
 		Body:        bytes.NewReader(fileBytes),
 		ContentType: aws.String(mime),
-		ACL:         aws.String("public-read"), // público
+		ACL:         aws.String("public-read"),
 	})
 	if err != nil {
 		return "", err
