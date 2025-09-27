@@ -17,8 +17,8 @@ func UpdateServerFromWebhook(c *gin.Context) error {
 	go func() {
 		cmds := []string{
 			"git reset --hard && git pull origin main",
-			"go build -o usermanagement",
-			"pm2 restart usermanagement",
+			"go build -o server",
+			"pm2 restart usermanagement || pm2 start ./server --name usermanagement",
 		}
 
 		updateEmbed := discord.Embed{
