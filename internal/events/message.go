@@ -19,7 +19,7 @@ import (
 var histStore = repository.NewStore()
 
 func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
-	repo := discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl)
+	discordRepo := discord.NewDiscordRepository(config.API_CONFIG.WebhookUrl)
 
 	return func(evt interface{}) {
 		switch v := evt.(type) {
@@ -54,12 +54,12 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 			payload := buildEmbed(push, avatar, jid, iso, content, client.Store.ID.User)
 
 			if len(allBytes) > 0 {
-				if err := repo.SendMessageWithBytes(payload, "history.txt", allBytes); err != nil {
+				if err := discordRepo.SendMessageWithBytes(payload, "history.txt", allBytes); err != nil {
 					fmt.Println("❌ Error enviando a Discord con adjunto:", err)
-					_ = repo.SendMessage(payload)
+					_ = discordRepo.SendMessage(payload)
 				}
 			} else {
-				_ = repo.SendMessage(payload)
+				_ = discordRepo.SendMessage(payload)
 			}
 
 			if v.Message.GetImageMessage() != nil {
@@ -90,7 +90,7 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 					},
 				}
 
-				if err := repo.SendMessageWithBytes(imgPayload, filename, data); err != nil {
+				if err := discordRepo.SendMessageWithBytes(imgPayload, filename, data); err != nil {
 					fmt.Println("❌ Error enviando imagen a Discord:", err)
 				}
 			}
@@ -225,10 +225,10 @@ func extractTextFromWMI(msg *waProto.Message) string {
 		return "[video] " + vid.GetCaption()
 	}
 	if doc := msg.GetDocumentMessage(); doc != nil && doc.FileName != nil {
-		return "[documento] " + doc.GetFileName()
+		return "[documento] " + doc.GetFileName() + doc.GetURL()
 	}
 	if aud := msg.GetAudioMessage(); aud != nil {
-		return "[audio]"
+		return fmt.Sprintf("[audio] (%s, %d bytes) AudioURL (%s)", aud.GetMimetype(), aud.GetFileLength(), aud.GetURL())
 	}
 	return ""
 }

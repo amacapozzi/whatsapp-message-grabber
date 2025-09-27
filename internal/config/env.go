@@ -7,8 +7,12 @@ import (
 )
 
 type Env struct {
-	DatabaseUrl string `mapstructure:"DATABASE_URL"`
-	WebhookUrl  string `mapstructure:"WEBHOOK_URL"`
+	DatabaseUrl           string `mapstructure:"DATABASE_URL"`
+	WebhookUrl            string `mapstructure:"WEBHOOK_URL"`
+	WasabiAccessKeyID     string `mapstructure:"WASABI_ACCESS_KEY_ID"`
+	WasabiSecretAccessKey string `mapstructure:"WASABI_SECRET_ACCESS_KEY"`
+	WasabiEndpoint        string `mapstructure:"WASABI_ENDPOINT"`
+	WasabiBucket          string `mapstructure:"WASABI_BUCKET"`
 }
 
 func NewEnv(filename string, override bool) *Env {
