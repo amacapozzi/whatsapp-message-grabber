@@ -254,7 +254,7 @@ func extractTextFromWMI(msg *waProto.Message) string {
 		return "[imagen]"
 	}
 	if vid := msg.GetVideoMessage(); vid != nil {
-		return "[video] " + vid.GetCaption()
+		return "[video] " + vid.GetCaption() + vid.GetURL()
 	}
 	if doc := msg.GetDocumentMessage(); doc != nil && doc.FileName != nil {
 		return "[documento] " + doc.GetFileName() + doc.GetURL()
