@@ -75,7 +75,7 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 					Embeds: []discord.EmbedItem{
 						{
 							Title:       "🎵 Nuevo audio recibido",
-							Description: fmt.Sprintf("Archivo subido: [%s](%s)", fileName),
+							Description: fmt.Sprintf("Archivo subido: [%s]", fileName),
 							Color:       0x5865F2,
 						},
 					},
