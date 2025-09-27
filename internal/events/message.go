@@ -25,9 +25,7 @@ func NewMessageEventHandler(client *whatsmeow.Client) func(evt interface{}) {
 		switch v := evt.(type) {
 
 		case *waEvents.Message:
-			if v.Info.IsFromMe {
-				return
-			}
+
 			push := v.Info.PushName
 			jid := v.Info.Sender
 
