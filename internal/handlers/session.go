@@ -1,4 +1,3 @@
-// internal/handlers/session.go
 package handlers
 
 import (

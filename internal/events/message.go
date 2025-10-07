@@ -37,6 +37,71 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
+// 👇 agrega helpers
+func (h *Handler) isFromMe(v *waEvents.Message) bool {
+	// 1) Si tu versión tiene MessageSource.IsFromMe:
+	if v.Info.MessageSource.IsFromMe {
+		return true
+	}
+	// 2) Fallback robusto: comparar el user del sender con tu device user
+	return v.Info.Sender.User == h.client.Store.ID.User
+}
+
+func phoneFromJID(j waTypes.JID) string {
+	// Para contactos 1:1 el server es "s.whatsapp.net"
+	if j.Server == waTypes.DefaultUserServer {
+		return j.User // número sin '+' (agregalo si querés)
+	}
+	return ""
+}
+
+func (h *Handler) resolveDisplayName(j waTypes.JID) string {
+	if h.client == nil || h.client.Store == nil || h.client.Store.Contacts == nil {
+		return ""
+	}
+
+	ctx := context.Background()
+	contact, err := h.client.Store.Contacts.GetContact(ctx, j)
+	if err == nil {
+		if contact.BusinessName != "" {
+			return contact.BusinessName
+		}
+		if contact.FullName != "" {
+			return contact.FullName
+		}
+		if contact.PushName != "" {
+			return contact.PushName
+		}
+	}
+
+	return ""
+}
+
+func buildOutboundEmbed(toName, toNumber string, toJID waTypes.JID, iso, content, myID string) discord.Embed {
+	dest := toName
+	if dest == "" {
+		dest = toNumber
+		if dest == "" {
+			dest = "(sin nombre)"
+		}
+	}
+	return discord.Embed{
+		Username:  usernameBot,
+		AvatarURL: "", // si querés el tuyo, ponelo
+		Embeds: []discord.EmbedItem{
+			{
+				Title:       fmt.Sprintf("📤 Mensaje enviado desde %s", myID),
+				Description: fmt.Sprintf("**Para:** %s\n**JID:** `%s`", dest, toJID.String()),
+				Color:       colorPrimary,
+				Timestamp:   iso,
+				Fields: []discord.EmbedField{
+					{Name: "Contenido", Value: codeBlock(content), Inline: false},
+				},
+			},
+		},
+	}
+}
+
 func NewMessageEventHandler(client *whatsmeow.Client) func(evt any) {
 	h := &Handler{
 		client:      client,
@@ -70,6 +135,37 @@ func (h *Handler) handleMessage(v *waEvents.Message) {
 	}
 	iso := ts.UTC().Format(time.RFC3339Nano)
 
+	// ➤ NUEVO: distingue entrante vs saliente
+	if h.isFromMe(v) {
+		// Saliente: el destinatario es el chat
+		toJID := v.Info.Chat
+		toName := h.resolveDisplayName(toJID)
+		toNumber := phoneFromJID(toJID)
+
+		payload := buildOutboundEmbed(toName, toNumber, toJID, iso, content, h.client.Store.ID.User)
+		_ = h.discordRepo.SendMessage(payload)
+
+		// Si querés también guardar en history por destinatario:
+		line := fmt.Sprintf("[%s] (yo → %s): %s",
+			ts.Format("2006-01-02 15:04:05"),
+			func() string {
+				if toName != "" {
+					return fmt.Sprintf("%s (%s)", toName, toJID.String())
+				}
+				if toNumber != "" {
+					return fmt.Sprintf("+%s (%s)", toNumber, toJID.String())
+				}
+				return toJID.String()
+			}(),
+			content,
+		)
+		_, _ = histStore.AppendBatch(toJID.String(), []string{line})
+
+		// y si hay media saliente, podés replicar lógica de envío si te interesa.
+		return
+	}
+
+	// Entrante (lo que ya tenías)
 	line := fmt.Sprintf("[%s] %s: %s",
 		ts.Format("2006-01-02 15:04:05"),
 		safe(push),
@@ -81,7 +177,6 @@ func (h *Handler) handleMessage(v *waEvents.Message) {
 
 	if len(allBytes) > 0 {
 		if err := h.discordRepo.SendMessageWithBytes(payload, historyName, allBytes); err != nil {
-			fmt.Println("❌ Error enviando a Discord con adjunto:", err)
 			_ = h.discordRepo.SendMessage(payload)
 		}
 	} else {

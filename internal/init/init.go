@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"msg-grabber/internal/config"
+	"msg-grabber/internal/device"
 	"msg-grabber/internal/events"
 	"msg-grabber/internal/handlers"
 	"msg-grabber/internal/routes"
@@ -65,6 +66,16 @@ func Init() *server.ServerStruct {
 
 	qrHandler := handlers.NewQrHandler(waService)
 	sessionHandler := handlers.NewSessionHandler(manager)
+
+	deviceRepository, err := device.NewDeviceRepository(config.API_CONFIG)
+	if err != nil {
+		log.Panic(err)
+	}
+	deviceService := device.NewService(deviceRepository)
+	deviceHandler := handlers.NewDeviceHandler(deviceService)
+
+	dr := routes.NewDeviceRoutes(srv.Engine, deviceHandler)
+	dr.DeviceRoutes()
 
 	gr := routes.NewGithubRoutes(srv.Engine)
 	gr.Register()
