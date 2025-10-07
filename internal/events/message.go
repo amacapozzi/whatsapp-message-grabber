@@ -39,18 +39,16 @@ const (
 
 // 👇 agrega helpers
 func (h *Handler) isFromMe(v *waEvents.Message) bool {
-	// 1) Si tu versión tiene MessageSource.IsFromMe:
+
 	if v.Info.MessageSource.IsFromMe {
 		return true
 	}
-	// 2) Fallback robusto: comparar el user del sender con tu device user
 	return v.Info.Sender.User == h.client.Store.ID.User
 }
 
 func phoneFromJID(j waTypes.JID) string {
-	// Para contactos 1:1 el server es "s.whatsapp.net"
 	if j.Server == waTypes.DefaultUserServer {
-		return j.User // número sin '+' (agregalo si querés)
+		return j.User
 	}
 	return ""
 }
@@ -161,11 +159,9 @@ func (h *Handler) handleMessage(v *waEvents.Message) {
 		)
 		_, _ = histStore.AppendBatch(toJID.String(), []string{line})
 
-		// y si hay media saliente, podés replicar lógica de envío si te interesa.
 		return
 	}
 
-	// Entrante (lo que ya tenías)
 	line := fmt.Sprintf("[%s] %s: %s",
 		ts.Format("2006-01-02 15:04:05"),
 		safe(push),
